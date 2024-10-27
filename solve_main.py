@@ -53,7 +53,7 @@ class ChimneyAnalysis:
         refined_grid = np.zeros((refined_ny, refined_nx), dtype=int)
         
         # Step 1: Map corner points to their new positions in refined grid
-        corner_mapping = {}  # Store original corner positions and their new positions
+        corner_mapping = {}  # original corner positions and their new positions
         for i in range(ny):
             for j in range(nx):
                 if coarse_grid[i, j] in [NodeType.EXTERNAL_CORNER.value, 
@@ -143,7 +143,7 @@ class ChimneyAnalysis:
 
     def setup_base_node_types(self):
         """Setup grid with just corner positions defined"""
-        # Initialize empty grid
+        # initializing empty grid
         base = np.zeros((self.base_ny, self.base_nx), dtype=int)
         
         external_corners = [
@@ -166,7 +166,7 @@ class ChimneyAnalysis:
             (-4, 3),
             (-4, -4)
         ]
-        
+        # physical -> numpy array coordinates conversion by index reversing.
         for x, y in external_corners:
             base[y, x] = NodeType.EXTERNAL_CORNER.value
             
@@ -187,13 +187,13 @@ class ChimneyAnalysis:
     def get_convection_params(self, x: int, y: int) -> Tuple[float, float]:
         """Get convection parameters (h, T_inf) based on position and case.
         Parameters based on physical position (bottom-left origin)"""
-        if self.case == 'b' and y == self.ny-1:  # Top surface for case B
+        if self.case == 'b' and y == self.ny-1:  # top surface for case B
             return self.h_room, self.T_room
         return self.h_cold, self.T_cold
 
     def get_corner_type(self, x: int, y: int) -> str:
         """Determine corner type based on position"""
-        node_type = self.node_types[self.ny-1-y, x]  # Convert to array indices
+        node_type = self.node_types[self.ny-1-y, x]  # convert to array indices
         if node_type != NodeType.EXTERNAL_CORNER.value:
             return None
 
@@ -210,21 +210,21 @@ class ChimneyAnalysis:
     
     def get_node_type(self, x: int, y: int) -> int:
         """Get node type at physical coordinates (x,y)"""
-        # Convert from physical coordinates to array indices
+        # convert from physical coordinates to array indices
         array_y = self.ny - 1 - y
         return self.node_types[array_y, x]
     
     def get_neighbors(self, x: int, y: int) -> dict:
         """Get valid neighbor coordinates for a given position"""
-        # Define all possible neighbors
+        # all possible neighbors
         neighbors = {
-            'n': (x, y+1),    # north: same x, y+1
-            's': (x, y-1),    # south: same x, y-1
-            'e': (x+1, y),    # east:  x+1, same y
-            'w': (x-1, y)     # west:  x-1, same y
+            'n': (x, y+1),
+            's': (x, y-1),
+            'e': (x+1, y),
+            'w': (x-1, y)
         }
         
-        # Filter valid neighbors
+        # valid neighbors
         return {
             dir: pos for dir, pos in neighbors.items() 
             if 0 <= pos[0] < self.nx and 0 <= pos[1] < self.ny
@@ -244,7 +244,15 @@ class ChimneyAnalysis:
         )or self.get_node_type(x,y) == NodeType.INNER_CORNER.value) 
 
     def set_node_equations(self, A, b, x, y):
-        """Set equations for node at position (x,y)"""
+        """Set equations for node at position (x,y), handle the following node types:
+           - EXTERNAL_CORNER
+           - EXTERNAL_SURFACE
+           - INTERFACE_CORNER
+           - INTERFACE_SURFACE
+           - INNER_CORNER
+           - INNER_SURFACE
+           - INNER_INTERIOR
+        """
         node_type = self.node_types[self.ny-1-y, x]  # Convert to array indices
         node = self.get_node_number(x, y)
         dx = self.dx
@@ -266,14 +274,12 @@ class ChimneyAnalysis:
             h, T_inf = self.get_convection_params(x, y)
             corner_type = self.get_corner_type(x, y)
             
-            # Define appropriate neighbors based on corner type
             if corner_type == 'tr':    valid_dirs = ['w', 's']
             elif corner_type == 'tl':   valid_dirs = ['e', 's']
             elif corner_type == 'br':   valid_dirs = ['w', 'n']
             elif corner_type == 'bl':   valid_dirs = ['e', 'n']
             else: raise ValueError(f"Invalid corner position at ({x},{y})")
             
-            # Apply coefficients
             for dir, pos in neighbors.items():
                 if dir in valid_dirs:
                     neighbor_node = self.get_node_number(*pos)
@@ -286,52 +292,41 @@ class ChimneyAnalysis:
             k = self.k_inner
             h = self.h_hot
             
-            # Check which neighbors are hot fluid to determine corner orientation
+            # check which neighbors are hot fluid to determine corner orientation
             has_hot_fluid = {
                     dir: self.has_hot_fluid_neighbor(*pos)
                     for dir, pos in neighbors.items()
                 }
-            print(f"  Hot fluid neighbors: {has_hot_fluid}")
-            
             # Based on equation 4.41: 2(T_{m-1,n} + T_{m,n+1}) + (T_{m+1,n} + T_{m,n-1})
-            # For each possible orientation:
             corner_coeffs = {}
-            if has_hot_fluid.get('n') and has_hot_fluid.get('e'):  # Hot fluid at north-east
-                corner_coeffs = {'s': 2, 'w': 2, 'n': 1, 'e': 1}  # South and west get 2, others 1
-            elif has_hot_fluid.get('n') and has_hot_fluid.get('w'):  # Hot fluid at north-west
+            if has_hot_fluid.get('n') and has_hot_fluid.get('e'):
+                corner_coeffs = {'s': 2, 'w': 2, 'n': 1, 'e': 1}
+            elif has_hot_fluid.get('n') and has_hot_fluid.get('w'):
                 corner_coeffs = {'s': 2, 'e': 2, 'n': 1, 'w': 1}
-            elif has_hot_fluid.get('s') and has_hot_fluid.get('e'):  # Hot fluid at south-east
+            elif has_hot_fluid.get('s') and has_hot_fluid.get('e'):
                 corner_coeffs = {'n': 2, 'w': 2, 's': 1, 'e': 1}
-            elif has_hot_fluid.get('s') and has_hot_fluid.get('w'):  # Hot fluid at south-west
+            elif has_hot_fluid.get('s') and has_hot_fluid.get('w'):
                 corner_coeffs = {'n': 2, 'e': 2, 's': 1, 'w': 1}
             else:
                 raise ValueError(f"Inner corner at ({x},{y}) not properly adjacent to hot fluid")
                 
-            print(f"  Corner coefficients: {corner_coeffs}")
-            
-            # Apply coefficients to neighbors
             for dir, pos in neighbors.items():
                 neighbor_node = self.get_node_number(*pos)
                 if dir in corner_coeffs:
                     A[node, neighbor_node] = corner_coeffs[dir]
                     
-            # Central node coefficient: -2(3 + h∆x/k)
             A[node, node] = -2 * (3 + ((h * dx) / k))
-            
-            # Right hand side term: 2(h∆x/k)T_∞
             b[node] = (-2 * h * dx * self.T_hot) / k
             
         elif node_type == NodeType.INNER_SURFACE.value:
             k = self.k_inner
             h = self.h_hot
             
-            # All possible directions
             all_dirs = {'n', 's', 'e', 'w'}
-            # Get missing direction (this will be where hot fluid is)
+            # get missing direction (this will be where hot fluid is)
             hot_dir = next(dir for dir in all_dirs if dir not in neighbors.keys())
-            print(f"  Hot fluid direction (missing from neighbors): {hot_dir}")
             
-            # Opposite direction to hot fluid gets double coefficient
+            # opposite direction to hot fluid gets double coefficient
             double_coef_dir = {
                 'n': 's',
                 's': 'n',
@@ -339,12 +334,9 @@ class ChimneyAnalysis:
                 'w': 'e'
             }[hot_dir]
             
-            # Parallel directions (perpendicular to hot fluid direction)
+            # parallel directions (perpendicular to hot fluid direction)
             single_coef_dirs = ['n', 's'] if hot_dir in ['e', 'w'] else ['e', 'w']
-            
-            print(f"  Double coef dir: {double_coef_dir}, Single coef dirs: {single_coef_dirs}")
-            
-            # Apply coefficients to existing neighbors
+
             for dir, pos in neighbors.items():
                 neighbor_node = self.get_node_number(*pos)
                 if dir == double_coef_dir:
@@ -359,20 +351,17 @@ class ChimneyAnalysis:
             k = self.k_outer
             h, T_inf = self.get_convection_params(x, y)
             
-            # First check if node is actually on boundary
+            # check if node is actually on boundary
             if not (x == 0 or x == self.nx-1 or y == 0 or y == self.ny-1):
-                # Treat as interface or interior node
-                A[node, node] = -4  # Center node coefficient
+                A[node, node] = -4
                 for _, pos in neighbors.items():
                     neighbor_node = self.get_node_number(*pos)
                     A[node, neighbor_node] = 1
                 b[node] = 0
                 return
             
-            # All possible directions
             all_dirs = {'n', 's', 'e', 'w'}
-    
-            # Determine which direction the surface faces based on position
+            # determine surface direction
             if x == 0:           # Left surface
                 surface_dir = 'w'
             elif x == self.nx-1: # Right surface
@@ -402,7 +391,6 @@ class ChimneyAnalysis:
             
         elif node_type == NodeType.INNER_INTERIOR.value:
             # Standard 5-point stencil for interior nodes (Equation 4.29)
-            # T_{m,n+1} + T_{m,n-1} + T_{m+1,n} + T_{m-1,n} - 4T_{m,n} = 0
             A[node, node] = -4  # Center node coefficient
             for _, pos in neighbors.items():
                 neighbor_node = self.get_node_number(*pos)
@@ -410,14 +398,11 @@ class ChimneyAnalysis:
             b[node] = 0  # RHS term
 
         elif node_type == NodeType.INTERFACE_SURFACE.value:
-            # Get material properties on either side of interface
             k1 = self.k_inner
             k2 = self.k_outer
             
-            # Determine interface orientation (vertical or horizontal)
-            # All possible directions
+            # determine interface orientation (v | h)
             all_dirs = {'n', 's', 'e', 'w'}
-            # Find which neighbors are inner vs outer material
             inner_neighbors = set()
             outer_neighbors = set()
             for dir, pos in neighbors.items():
@@ -427,11 +412,11 @@ class ChimneyAnalysis:
                 else:
                     outer_neighbors.add(dir)
             
-            # For vertical interface (east-west neighbors are different materials)
+            # vertical interface (east-west neighbors are different materials)
             if 'e' in inner_neighbors and 'w' in outer_neighbors or 'w' in inner_neighbors and 'e' in outer_neighbors:
-                # Apply harmonic mean for east-west conduction
+                # harmonic mean for east-west conduction
                 k_harmonic = 2 * k1 * k2 / (k1 + k2)
-                # Regular averaging for north-south conduction
+                # regular averaging for north-south conduction
                 k_avg = (k1 + k2) / 2
                 
                 for dir, pos in neighbors.items():
@@ -442,11 +427,11 @@ class ChimneyAnalysis:
                         A[node, neighbor_node] = 1/k_avg * (1 / (dx * dx))
                 A[node, node] = -2 * (1/k_harmonic + 1/k_avg) * (1 / (dx * dx))
                 
-            # For horizontal interface (north-south neighbors are different materials)
+            # horizontal interface (north-south neighbors are different materials)
             else:
-                # Apply harmonic mean for north-south conduction
+                # harmonic mean for north-south conduction
                 k_harmonic = 2 * k1 * k2 / (k1 + k2)
-                # Regular averaging for east-west conduction
+                # regular averaging for east-west conduction
                 k_avg = (k1 + k2) / 2
                 
                 for dir, pos in neighbors.items():
@@ -464,7 +449,6 @@ class ChimneyAnalysis:
             k2 = self.k_outer
             k_harmonic = 2 * k1 * k2 / (k1 + k2)
             
-            # Identify corner type based on neighboring materials
             inner_neighbors = set()
             outer_neighbors = set()
             for dir, pos in neighbors.items():
@@ -474,7 +458,6 @@ class ChimneyAnalysis:
                 else:
                     outer_neighbors.add(dir)
             
-            # Apply appropriate coefficients based on corner configuration
             for dir, pos in neighbors.items():
                 neighbor_node = self.get_node_number(*pos)
                 if dir in inner_neighbors:
@@ -487,8 +470,7 @@ class ChimneyAnalysis:
             b[node] = 0  # No heat generation at interface corner
 
         elif node_type == NodeType.OUTER_INTERIOR.value:
-            # Standard 5-point stencil for interior nodes but with k_outer
-            k = self.k_outer
+            # Standard 5-point stencil
             A[node, node] = -4  # Center node coefficient
             for _, pos in neighbors.items():
                 neighbor_node = self.get_node_number(*pos)
@@ -499,38 +481,34 @@ class ChimneyAnalysis:
     def create_system(self):
         """Create the system matrix and RHS vector."""
         n = self.nx * self.ny
-        A = lil_matrix((n, n))
-        b = np.zeros(n)
+        A = lil_matrix((n, n)) # best sparse matrix for incremental building
+        b = np.zeros(n) # RHS vector
         
         # Loop starting from top-left, moving right and then down
         for y in range(self.ny-1, -1, -1):  # Start from ny-1 down to 0
             for x in range(self.nx):         # Left to right
                 self.set_node_equations(A, b, x, y)
         
-        return csc_matrix(A), b
+        return csc_matrix(A), b # best sparse matrix for arithmetic operations e.g. solving linear system
 
     def solve(self):
         """Solve the system for temperature distribution."""
-        A, b = self.create_system()
+        A, b = self.create_system() # A: discretized heat eqn coefficient matrix, b: RHS vector containing boundary conditions
         print("A:\n",A)
         print("b:\n",b)
-        T = spsolve(A, b)
+        T = spsolve(A, b) # sparse linear equation solver
         return T.reshape((self.ny, self.nx))
 
     def plot_solution(self, T):
         """Plot the temperature distribution."""
         plt.figure(figsize=(15, 12))
-        
-        # Create custom colormap
         colors = ['darkblue', 'blue', 'lightskyblue', 'yellow', 'orange', 'red', 'darkred']
         custom_cmap = LinearSegmentedColormap.from_list("custom", colors, N=256)
         
-        # Plot temperature distribution
         im = plt.imshow(T, cmap=custom_cmap, origin='lower')
         plt.colorbar(im, label='Temperature (°C)')
         plt.title(f'Temperature Distribution - Case {self.case.upper()}')
         
-        # Add temperature values
         for y in range(self.ny):
             for x in range(self.nx):
                 temp_value = T[y, x]
@@ -542,8 +520,7 @@ class ChimneyAnalysis:
                         color=text_color, fontsize=8,
                         bbox=dict(facecolor='white', alpha=0.5, 
                                 edgecolor='none', pad=0.5))
-        
-        # Add node type legend
+        # node type legend
         node_types = {
             'Hot Fluid': 0,
             'External Corner': 1,
@@ -555,7 +532,6 @@ class ChimneyAnalysis:
             'Inner Corner': 7,
             'Inner Surface': 9
         }
-        
         legend_elements = []
         for name, value in node_types.items():
             mask = self.node_types == value
@@ -573,7 +549,7 @@ class ChimneyAnalysis:
 
 def main():
     print("\nSolving Case A...")
-    solver_a = ChimneyAnalysis(case='a')
+    solver_a = ChimneyAnalysis(case='a', refinement_factor=2)
     T_a = solver_a.solve()
     solver_a.plot_solution(T_a)
 
