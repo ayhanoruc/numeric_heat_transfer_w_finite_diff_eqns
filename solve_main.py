@@ -257,7 +257,7 @@ class ChimneyAnalysis:
         node = self.get_node_number(x, y)
         dx = self.dx
         
-        print(f"Processing node at ({x},{y}) - Type: {NodeType(node_type).name}")
+        #print(f"Processing node at ({x},{y}) - Type: {NodeType(node_type).name}")
         
         if node_type == NodeType.HOT_FLUID.value:
             A[node, node] = 1
@@ -266,7 +266,6 @@ class ChimneyAnalysis:
 
         # Get valid neighbors for this node
         neighbors = self.get_neighbors(x, y)
-        print(f"  Valid neighbors: {neighbors}")
 
         # Handle different node types
         if node_type == NodeType.EXTERNAL_CORNER.value:
